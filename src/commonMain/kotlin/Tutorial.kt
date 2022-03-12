@@ -1,4 +1,5 @@
 import com.soywiz.korge.input.*
+import com.soywiz.korge.service.storage.NativeStorage
 import com.soywiz.korge.ui.textAlignment
 import com.soywiz.korge.ui.textColor
 import com.soywiz.korge.ui.textSize
@@ -7,6 +8,7 @@ import com.soywiz.korge.view.*
 import com.soywiz.korim.color.Colors
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.text.TextAlignment
+import com.soywiz.korio.async.ObservableProperty
 import io.github.aakira.napier.Napier
 
 enum class TutorialType(val index: Int,
@@ -14,32 +16,30 @@ enum class TutorialType(val index: Int,
                         val color: RGBA,
                         val textColor: RGBA = Colors.BLACK,
                         val topIndent: Double = 20.0) {
-    MERGE(0,
-        """Combine sequences of
-          |3 or more blocks and
-          |get a high score!""".trimMargin(), Colors["#bca8ff"], topIndent = 25.0),
-    PATTERN(1, """|Special patterns are
-                        |highlighted BLUE and
-                        |result in BONUS blocks!""".trimMargin().trimIndent(), Colors["#99ddff"]),
-    ROCKET(4, """Use a ROCKET to
-                      |move one block to
-                      |any other space""".trimMargin(), Colors["#ca9dd7"]),
-    ROCKET2(3, """Merge a sequence of
-                       |EIGHT or more blocks
-                       |to get a ROCKET""".trimMargin(), Colors["#ca9dd7"]),
-    BOMB(5, """Use a BOMB to
-                    |destroy blocks in a jam""".trimMargin(), Colors["#990a00"]),
-    BOMB2(2, """Reaching a new block
-                     |tier adds a BOMB
-                     |to your inventory""".trimMargin(), Colors["#990a00"])
+    EXAMPLE(0,
+        """This is a
+          |template example of
+          |a tutorial
+        """.trimMargin(), Colors["#bca8ff"], topIndent = 25.0),
 }
 
-data class TutorialsComplete
-    (var MergeTutorial: MutableList<Boolean> = MutableList(6) { false }) {
+data class Tutorial
+    (var MergeTutorial: MutableList<Boolean> = MutableList(6) { false },
+     val tutorialProperty: ObservableProperty<String> = ObservableProperty("")) {
 
-    fun fromString (string: String): TutorialsComplete {
+
+    private fun fromString (string: String): Tutorial {
         string.toList().forEachIndexed { i, c -> this.MergeTutorial[i] = c == 'Y' }
         return this
+    }
+
+    fun init (storage: NativeStorage) {
+        tutorial.fromString (storage.getOrNull("Tutorial") ?: "")
+
+        tutorial.tutorialProperty.observe {
+            // new code line here
+            storage["Tutorial"] = tutorial.toString()
+        }
     }
 
     override fun toString (): String {
@@ -52,79 +52,61 @@ data class TutorialsComplete
 
     fun markComplete (tutorialType: TutorialType) : Unit {
         this.MergeTutorial[tutorialType.index] = true
+        this.tutorialProperty.update(tutorial.toString())
     }
 
-    }
+
+}
 
 fun getContainerWidth(tutorialType: TutorialType) : Int {
     return when (tutorialType) {
-        TutorialType.MERGE -> fieldWidth * 4 / 5
-        TutorialType.PATTERN -> fieldWidth * 4 / 5
-        TutorialType.BOMB2 -> fieldWidth * 4 / 5
-        TutorialType.ROCKET2 -> fieldWidth * 3 / 5
-        TutorialType.ROCKET -> fieldWidth * 3 / 5
-        TutorialType.BOMB -> fieldWidth * 4 / 5
+        TutorialType.EXAMPLE -> gameView.fieldWidth * 4 / 5
     }
 }
 
 fun getContainerHeight(tutorialType: TutorialType) : Int {
     return when (tutorialType) {
-        TutorialType.MERGE -> fieldWidth / 3
-        TutorialType.PATTERN -> fieldWidth / 3
-        TutorialType.BOMB2 -> fieldWidth / 3
-        TutorialType.ROCKET2 -> fieldWidth / 3
-        TutorialType.ROCKET -> fieldWidth / 3
-        TutorialType.BOMB -> fieldWidth / 4
+        TutorialType.EXAMPLE -> gameView.fieldWidth / 3
     }
 }
 
 fun getTextSize(tutorialType: TutorialType) : Int {
     return when (tutorialType) {
-        TutorialType.MERGE -> cellSize / 2
-        TutorialType.PATTERN -> cellSize * 3 / 5
-        TutorialType.BOMB2 -> cellSize / 2
-        TutorialType.ROCKET2 -> cellSize / 2
-        TutorialType.ROCKET -> cellSize / 2
-        TutorialType.BOMB -> cellSize / 2
+        TutorialType.EXAMPLE -> 16
     }
 }
 
-fun getSecondTutorial(tutorialType: TutorialType) : TutorialType? {
+fun getSubsequentTutorial(tutorialType: TutorialType) : TutorialType? {
     return when (tutorialType) {
-        TutorialType.MERGE,
-        TutorialType.PATTERN,
-        TutorialType.ROCKET2,
-        TutorialType.BOMB2 -> null
-        TutorialType.BOMB -> TutorialType.BOMB2
-        TutorialType.ROCKET -> TutorialType.ROCKET2
+        TutorialType.EXAMPLE -> null
     }
 }
 
 fun Container.showTutorial(tutorialType: TutorialType) = container {
     var currentTutorial = tutorialType
-    showingTutorial = true
+    popup.showTutorial()
     Napier.d("Showing Tutorial Container...")
     fun closeTutorial(redrawTutorial: () -> Unit){
-        tutorialsComplete.markComplete(currentTutorial)
-        tutorialProperty.update(tutorialsComplete.toString())
-        if (getSecondTutorial(currentTutorial) == null) {
+        tutorial.markComplete(currentTutorial)
+
+        if (getSubsequentTutorial(currentTutorial) == null) {
             Napier.d("Closing Tutorial Container...")
             this@container.removeFromParent()
-            showingTutorial = false
+            popup.hidePopup()
         }
         else{
             Napier.d("Showing Second Tutorial Container...")
-            currentTutorial = getSecondTutorial(tutorialType)!!
+            currentTutorial = getSubsequentTutorial(tutorialType)!!
             this.removeChildren()
             redrawTutorial()
         }
     }
     fun drawTutorial() {
-        val restartBackground = roundRect(fieldWidth, fieldHeight, 5, fill = Colors["#aaa6a4cc"]) {
-            centerXOn(gameField)
-            centerYOn(gameField)
+        val restartBackground = roundRect(gameView.fieldWidth, gameView.fieldHeight, 5, fill = Colors["#aaa6a4cc"]) {
+            centerXOn(gameView.gameField)
+            centerYOn(gameView.gameField)
             onUp {
-                Napier.d("onUp background - Tutorial pane hidden")
+                Napier.d("Background container clicked when showing tutorial")
                 closeTutorial { drawTutorial() }
             }
         }
